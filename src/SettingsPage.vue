@@ -15,7 +15,7 @@ import {
   SquareCheckBig,
   Trash2
 } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { buildProxyUrl, cloneSettings, createDefaultSettings } from './settings'
 
 const props = defineProps<{
@@ -37,8 +37,6 @@ const sourcePasswordVisible = ref(false)
 const proxyPasswordVisible = ref(false)
 const sourceAuthExpanded = ref(false)
 const resetArmed = ref(false)
-const resetCountdown = ref(0)
-let resetTimer: ReturnType<typeof setInterval> | null = null
 const activeSource = computed(
   () =>
     draft.value.sources.find((source) => source.id === draft.value.selectedSourceId) ||
@@ -105,52 +103,38 @@ function toggleActiveSourceProxy(): void {
 function chooseDownloadPath(): void {
   if (!props.runtimeAvailable) return
   const selected = window.services.chooseOutputDirectory(draft.value.downloadPath)
-  if (selected) draft.value.downloadPath = selected
+  if (selected) draft.value.downloadPath = appendDefaultDownloadFolder(selected)
+}
+
+/** 为资源管理器选择的目录追加插件专用子目录。 */
+function appendDefaultDownloadFolder(directory: string): string {
+  const trimmed = directory.trim()
+  if (!trimmed) return ''
+  const normalized = trimmed.replace(/[\\/]+$/, '')
+  const lastSegment = normalized.split(/[\\/]/).pop() || ''
+  if (lastSegment.toLowerCase() === 'did-tool') return normalized
+  const separator = trimmed.includes('\\') ? '\\' : '/'
+  return normalized ? `${normalized}${separator}did-tool` : `${separator}did-tool`
 }
 
 /** 两次点击后恢复默认设置。 */
 function resetSettings(): void {
   if (!resetArmed.value) {
-    armReset()
+    resetArmed.value = true
     return
   }
-  if (resetCountdown.value > 0) return
   draft.value = createDefaultSettings(props.defaultDownloadPath)
   currentSection.value = 'sources'
   sourcePasswordVisible.value = false
   proxyPasswordVisible.value = false
   sourceAuthExpanded.value = false
-  cancelReset()
+  resetArmed.value = false
   error.value = ''
-}
-
-/** 停止恢复默认倒计时。 */
-function stopResetCountdown(): void {
-  if (!resetTimer) return
-  clearInterval(resetTimer)
-  resetTimer = null
 }
 
 /** 取消恢复默认操作并恢复初始按钮状态。 */
 function cancelReset(): void {
-  stopResetCountdown()
   resetArmed.value = false
-  resetCountdown.value = 0
-}
-
-/** 开始恢复默认操作的三秒倒计时。 */
-function armReset(): void {
-  stopResetCountdown()
-  resetArmed.value = true
-  resetCountdown.value = 3
-  resetTimer = setInterval(() => {
-    if (resetCountdown.value <= 1) {
-      resetCountdown.value = 0
-      stopResetCountdown()
-      return
-    }
-    resetCountdown.value -= 1
-  }, 1000)
 }
 
 /** 校验并保存设置。 */
@@ -204,7 +188,6 @@ function validateSettings(settings: AppSettings): string {
   }
   return ''
 }
-onBeforeUnmount(stopResetCountdown)
 </script>
 
 <template>
@@ -224,11 +207,10 @@ onBeforeUnmount(stopResetCountdown)
             type="button"
             class="reset-button"
             :class="{ armed: resetArmed }"
-            :disabled="resetArmed && resetCountdown > 0"
             @click="resetSettings"
           >
             <RotateCcw :size="15" />
-            {{ resetArmed ? (resetCountdown > 0 ? `确认恢复（${resetCountdown}秒）` : '确认恢复') : '恢复默认' }}
+            {{ resetArmed ? '确认恢复' : '恢复默认' }}
           </button>
         </div>
         <button type="button" class="save-button" @click="saveSettings">
@@ -287,9 +269,9 @@ onBeforeUnmount(stopResetCountdown)
             :title="activeSource?.proxyEnabled ? '关闭当前镜像源代理' : '启用当前镜像源代理'"
             @click="toggleActiveSourceProxy"
           >
-            <span>{{ activeSource?.proxyEnabled ? '已启用代理' : '未启用代理' }}</span>
             <SquareCheckBig v-if="activeSource?.proxyEnabled" :size="16" class="proxy-checkbox" />
             <Square v-else :size="16" class="proxy-checkbox" />
+            <span>{{ activeSource?.proxyEnabled ? '已启用代理' : '未启用代理' }}</span>
           </button>
           <button type="button" class="secondary-button" @click="addSource">
             <Plus :size="16" />
@@ -598,11 +580,6 @@ onBeforeUnmount(stopResetCountdown)
 .reset-button {
   color: var(--text-secondary);
   background: var(--subtle-background-strong);
-}
-
-.reset-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
 }
 
 .reset-cancel {
